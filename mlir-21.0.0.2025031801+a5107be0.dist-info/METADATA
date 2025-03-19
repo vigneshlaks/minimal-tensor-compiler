@@ -1,0 +1,17 @@
+Metadata-Version: 2.2
+Name: mlir
+Version: 21.0.0.2025031801+a5107be0
+Summary: MLIR distribution as wheel. Created at 2025-03-18 09:38:12.626065 build of https://github.com/llvm/llvm-project/commit/a5107be0
+Download-URL: https://github.com/llvm/llvm-project/commit/a5107be0
+Author: Maksim Levental
+Author-email: maksim.levental@gmail.com
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: author
+Dynamic: author-email
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: download-url
+Dynamic: summary
+
+MLIR distribution as wheel. Created at 2025-03-18 09:38:12.626065 build of [llvm/llvm-project/a5107be0](https://github.com/llvm/llvm-project/commit/a5107be0)
