@@ -17,11 +17,16 @@ using namespace mlir;
 using namespace mlir::minimal;
 
 int main(int argc, char **argv) {
+  // register passes
   mlir::registerAllPasses();
   mlir::minimal::registerPasses();
+
+  // register dialects
   mlir::DialectRegistry registry;
   registry.insert<mlir::minimal::MinimalDialect, mlir::arith::ArithDialect,
                   mlir::func::FuncDialect>();
+
+  // Add MLIR core dialects.
   registerAllDialects(registry);
 
   return mlir::asMainReturnCode(

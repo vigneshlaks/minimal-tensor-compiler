@@ -68,6 +68,26 @@ def Minimal_FooOp : Minimal_Op<"foo", [Pure, SameOperandsAndResultType]> {
     }];
 }
 
+def ConvOp : Minimal_Op<"conv", [Pure]> {
+  let summary = "Convolution operation";
+  let description = [{
+    Performs a 2D convolution with the given input and filter tensors.
+  }];
+  
+  let arguments = (ins
+    TensorOf<[AnyType]>:$input,
+    TensorOf<[AnyType]>:$filter
+  );
+  
+  let results = (outs
+    TensorOf<[AnyType]>:$output
+  );
+  
+  let assemblyFormat = [{
+    $input `,` $filter attr-dict `:` type($input) `,` type($filter) `->` type($output)
+  }];
+}
+
 def MinimalSwitchBarFoo: Pass<"minimal-switch-bar-foo", "::mlir::ModuleOp"> {
   let summary = "Switches the name of a FuncOp named `bar` to `foo` and folds.";
   let description = [{
@@ -82,6 +102,26 @@ def MinimalSwitchBarFoo: Pass<"minimal-switch-bar-foo", "::mlir::ModuleOp"> {
     }
     ```
   }];
+}
+
+def ConvToLinalg: Pass<"minimal-conv-to-linalg", "::mlir::func::FuncOp"> {
+  let summary = "Convert Minimal Conv operations to Linalg operations";
+  let description = [{
+    This pass lowers minimal.conv operations to linalg.conv_2d_nhwc_hwcf operations.
+    
+    Example:
+    ```mlir
+    %conv = minimal.conv %input, %filter : tensor<1x28x28x1xf32>, tensor<3x3x1x32xf32> -> tensor<1x26x26x32xf32>
+    ```
+    
+    Gets converted to a linalg.conv_2d_nhwc_hwcf operation with appropriate tensor setup.
+  }];
+  let constructor = "mlir::minimal::createConvToLinalgPass()";
+  let dependentDialects = [
+    "mlir::linalg::LinalgDialect",
+    "mlir::tensor::TensorDialect",
+    "mlir::arith::ArithDialect"
+  ];
 }
 
 class Minimal_Type<string name, string typeMnemonic, list<Trait> traits = []>

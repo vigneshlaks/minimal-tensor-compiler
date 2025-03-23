@@ -24,7 +24,10 @@
 #define GET_OP_CLASSES
 #include "MinimalOps.h.inc"
 
+
 namespace mlir::minimal {
+std::unique_ptr<mlir::Pass> createConvToLinalgPass();
+
 #define GEN_PASS_DECL
 #include "MinimalPasses.h.inc"
 

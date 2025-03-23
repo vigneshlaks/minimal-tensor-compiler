@@ -1,6 +1,7 @@
 add_mlir_dialect_library(
   MLIRMinimal
   MinimalDialect.cpp
+  ConvToLinalg.cpp
 
   # to silence LLVMProcessSources.cmake:116
   PARTIAL_SOURCES_INTENDED
