@@ -1,21 +1,25 @@
 add_mlir_dialect_library(
-  MLIRMinimal
-  MinimalDialect.cpp
-  ConvToLinalg.cpp
+    MLIRMinimal
+    MinimalDialect.cpp
 
-  # to silence LLVMProcessSources.cmake:116
-  PARTIAL_SOURCES_INTENDED
+    ConvToLinalg.cpp
 
-  ADDITIONAL_HEADER_DIRS
-  ${PROJECT_SOURCE_DIR}/include
+    MatMulLinalg.cpp
+    MatMulTiling.cpp
 
-  DEPENDS
-  MLIRMinimalIncGen
+    # to silence LLVMProcessSources.cmake:116
+    PARTIAL_SOURCES_INTENDED
 
-  LINK_LIBS PUBLIC
-  MLIRIR
-  MLIRInferTypeOpInterface
-  MLIRFuncDialect
+    ADDITIONAL_HEADER_DIRS
+    ${PROJECT_SOURCE_DIR}/include
+
+    DEPENDS
+    MLIRMinimalIncGen
+
+    LINK_LIBS PUBLIC
+    MLIRIR
+    MLIRInferTypeOpInterface
+    MLIRFuncDialect
 )
 
 add_mlir_public_c_api_library(MinimalCAPI

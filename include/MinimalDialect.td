@@ -136,4 +136,79 @@ def Minimal_CustomType : Minimal_Type<"Custom", "custom"> {
     let assemblyFormat = "`<` $value `>`";
 }
 
+// Matrix Multiplication Operation
+def MatMulOp : Minimal_Op<"matmul", [Pure]> {
+  let summary = "Matrix multiplication operation";
+  let description = [{
+    Performs matrix multiplication C = A * B where A is MxK and B is KxN.
+
+    Example:
+    ```mlir
+    %C = minimal.matmul %A, %B : tensor<4x8xf32>, tensor<8x16xf32> -> tensor<4x16xf32>
+    ```
+  }];
+
+  let arguments = (ins
+    TensorOf<[AnyType]>:$lhs,
+    TensorOf<[AnyType]>:$rhs
+  );
+
+  let results = (outs
+    TensorOf<[AnyType]>:$output
+  );
+
+  let assemblyFormat = [{
+    $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($output)
+  }];
+}
+
+// MatMulToLinalg pass
+def MatMulToLinalg: Pass<"minimal-matmul-to-linalg", "::mlir::func::FuncOp"> {
+  let summary = "Convert Minimal MatMul operations to Linalg operations";
+  let description = [{
+    This pass lowers minimal.matmul operations to linalg.generic operations
+    representing matrix multiplication.
+
+    Example:
+    ```mlir
+    %C = minimal.matmul %A, %B : tensor<4x8xf32>, tensor<8x16xf32> -> tensor<4x16xf32>
+    ```
+
+    Gets converted to a linalg.generic operation with appropriate tensor setup.
+  }];
+  let constructor = "mlir::minimal::createMatMulToLinalgPass()";
+  let dependentDialects = [
+    "mlir::linalg::LinalgDialect",
+    "mlir::tensor::TensorDialect",
+    "mlir::arith::ArithDialect"
+  ];
+}
+
+// MatMulTiling pass
+def MatMulTiling: Pass<"matmul-tiling", "::mlir::func::FuncOp"> {
+  let summary = "Tile matrix multiplication operations";
+  let description = [{
+    This pass tiles matrix multiplication operations that have been lowered to
+    linalg.generic operations with specific access patterns. Tiling improves
+    cache locality and enables further optimizations like vectorization and parallelization.
+  }];
+  let constructor = "mlir::minimal::createMatMulTilingPass()";
+  let dependentDialects = [
+    "mlir::linalg::LinalgDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::tensor::TensorDialect",
+    "mlir::arith::ArithDialect"
+  ];
+
+  let options = [
+    Option<"tileSizeM", "tile-size-m", "int64_t", "64",
+           "Tile size for M dimension (rows of first matrix)">,
+    Option<"tileSizeN", "tile-size-n", "int64_t", "64",
+           "Tile size for N dimension (columns of second matrix)">,
+    Option<"tileSizeK", "tile-size-k", "int64_t", "64",
+           "Tile size for K dimension (inner dimension)">
+  ];
+}
+
+
 #endif // MINIMAL_DIALECT
