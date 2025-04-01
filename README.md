@@ -1,4 +1,4 @@
-# Minimal MLIR
+# Minimal Tensor Compiler
 
 This repo demos a slightly unconventional way to bootstrap an MLIR project:
 
