@@ -82,7 +82,7 @@ static bool isMatmulGenericOp(Operation *op) {
   if (body.getNumArguments() != 3)
     return false;
 
-  // Simple check for basic matmul operations: look for a multiply followed by an add.
+  // Check for basic matmul operations: look for a multiply followed by an add.
   bool foundMul = false;
   bool foundAdd = false;
   bool foundYield = false;

@@ -211,4 +211,59 @@ def MatMulTiling: Pass<"matmul-tiling", "::mlir::func::FuncOp"> {
 }
 
 
+def MatMulVectorize: Pass<"matmul-vectorize", "::mlir::func::FuncOp"> {
+   let summary = "Vectorize matrix multiplication operation";
+
+   let description = [{
+       Transforms tiled matrix multiplication operations into vectorized form.
+       This pass identifies linalg.generic operations that represent matrix
+       multiplications and have already been tiled, then transforms them to
+       use vector operations for improved performance on SIMD hardware.
+   }];
+
+   let constructor = "mlir::minimal::createMatMulVectorizationPass()";
+   let dependentDialects = [
+       "mlir::linalg::LinalgDialect",
+       "mlir::vector::VectorDialect",
+       "mlir::scf::SCFDialect",
+       "mlir::tensor::TensorDialect",
+       "mlir::arith::ArithDialect"
+   ];
+
+   let options = [
+       Option<"vectorSize", "vector-size", "int64_t", /*default=*/"8",
+              "Vector size for SIMD operations">,
+       Option<"lowerVectorContracts", "lower-vector-contracts", "bool", /*default=*/"true",
+              "Lower vector.contract operations to vector.fma">
+   ];
+}
+
+
+// MatMulBufferize pass
+def MatMulBufferize: Pass<"matmul-bufferize", "::mlir::func::FuncOp"> {
+    let summary = "Bufferize matrix multiplication operations";
+    let description = [{
+    This pass transforms tensor-based matrix multiplication operations that have
+    been tiled to use memory buffers (memrefs) instead of tensors. Bufferization
+    is a key step in lowering high-level tensor operations to lower-level code
+    that operates on memory buffers.
+
+    The pass specifically looks for tiled linalg.generic operations with the "tiled"
+    attribute and transforms:
+    - tensor.extract_slice to memref.subview
+    - tensor.insert_slice to memref-based operations
+    - linalg.generic on tensors to linalg.generic on memrefs
+    }];
+    let constructor = "mlir::minimal::createMatMulBufferizePass()";
+    let dependentDialects = [
+    "mlir::linalg::LinalgDialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::bufferization::BufferizationDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::tensor::TensorDialect",
+    "mlir::arith::ArithDialect"
+    ];
+}
+
+
 #endif // MINIMAL_DIALECT

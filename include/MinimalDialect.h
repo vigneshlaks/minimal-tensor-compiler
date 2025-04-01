@@ -33,7 +33,8 @@ std::unique_ptr<mlir::Pass> createConvToLinalgPass();
 // Matmul
 std::unique_ptr<mlir::Pass> createMatMulToLinalgPass();
 std::unique_ptr<mlir::Pass> createMatMulTilingPass();
-
+std::unique_ptr<mlir::Pass> createMatMulBufferizePass();
+std::unique_ptr<mlir::Pass> createMatMulVectorizationPass();
 
 #define GEN_PASS_DECL
 #include "MinimalPasses.h.inc"

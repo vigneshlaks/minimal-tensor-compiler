@@ -6,6 +6,8 @@ add_mlir_dialect_library(
 
     MatMulLinalg.cpp
     MatMulTiling.cpp
+    MatMulBufferize.cpp
+    MatMulVectorize.cpp
 
     # to silence LLVMProcessSources.cmake:116
     PARTIAL_SOURCES_INTENDED
