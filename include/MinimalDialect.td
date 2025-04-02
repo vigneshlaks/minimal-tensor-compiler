@@ -109,11 +109,6 @@ def ConvToLinalg: Pass<"minimal-conv-to-linalg", "::mlir::func::FuncOp"> {
   let description = [{
     This pass lowers minimal.conv operations to linalg.conv_2d_nhwc_hwcf operations.
     
-    Example:
-    ```mlir
-    %conv = minimal.conv %input, %filter : tensor<1x28x28x1xf32>, tensor<3x3x1x32xf32> -> tensor<1x26x26x32xf32>
-    ```
-    
     Gets converted to a linalg.conv_2d_nhwc_hwcf operation with appropriate tensor setup.
   }];
   let constructor = "mlir::minimal::createConvToLinalgPass()";
@@ -174,7 +169,7 @@ def MatMulToLinalg: Pass<"minimal-matmul-to-linalg", "::mlir::func::FuncOp"> {
     %C = minimal.matmul %A, %B : tensor<4x8xf32>, tensor<8x16xf32> -> tensor<4x16xf32>
     ```
 
-    Gets converted to a linalg.generic operation with appropriate tensor setup.
+    Gets converted to a linalg.generic operation.
   }];
   let constructor = "mlir::minimal::createMatMulToLinalgPass()";
   let dependentDialects = [
@@ -189,8 +184,7 @@ def MatMulTiling: Pass<"matmul-tiling", "::mlir::func::FuncOp"> {
   let summary = "Tile matrix multiplication operations";
   let description = [{
     This pass tiles matrix multiplication operations that have been lowered to
-    linalg.generic operations with specific access patterns. Tiling improves
-    cache locality and enables further optimizations like vectorization and parallelization.
+    linalg.generic operations with specific access patterns.
   }];
   let constructor = "mlir::minimal::createMatMulTilingPass()";
   let dependentDialects = [
@@ -231,9 +225,9 @@ def MatMulVectorize: Pass<"matmul-vectorize", "::mlir::func::FuncOp"> {
    ];
 
    let options = [
-       Option<"vectorSize", "vector-size", "int64_t", /*default=*/"8",
+       Option<"vectorSize", "vector-size", "int64_t", "8",
               "Vector size for SIMD operations">,
-       Option<"lowerVectorContracts", "lower-vector-contracts", "bool", /*default=*/"true",
+       Option<"lowerVectorContracts", "lower-vector-contracts", "bool", "true",
               "Lower vector.contract operations to vector.fma">
    ];
 }

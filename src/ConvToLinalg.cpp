@@ -25,7 +25,7 @@ struct ConvToLinalgPattern : public OpRewritePattern<ConvOp> {
 
   LogicalResult matchAndRewrite(ConvOp op,
                               PatternRewriter &rewriter) const override {
-    // Convert minimal.conv to linalg.conv_2d_nhwc_hwcf
+    // Convert minimal.conv to linalg.conv_2d
     Location loc = op.getLoc();
     Value input = op.getInput();
     Value filter = op.getFilter();
@@ -46,10 +46,10 @@ struct ConvToLinalgPattern : public OpRewritePattern<ConvOp> {
     // Create the linalg convolution operation
     Value result = rewriter.create<linalg::Conv2DNhwcHwcfOp>(
         loc,
-        TypeRange{outputType},         // resultTensorTypes
-        ValueRange{input, filter},     // inputs array
-        ValueRange{filledTensor},      // outputs array
-        ArrayRef<NamedAttribute>{}     // attributes
+        TypeRange{outputType},
+        ValueRange{input, filter},
+        ValueRange{filledTensor},
+        ArrayRef<NamedAttribute>{}
     ).getResult(0);
     
     rewriter.replaceOp(op, result);
@@ -77,7 +77,7 @@ struct ConvToLinalg : public impl::ConvToLinalgBase<ConvToLinalg> {
       signalPassFailure();
   }
 };
-} // end anonymous namespace
+}
 
 // Pass registration
 std::unique_ptr<Pass> createConvToLinalgPass() {

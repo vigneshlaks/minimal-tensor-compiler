@@ -35,21 +35,17 @@ using namespace mlir;
 
 namespace {
 
-// Helper to check if an operation is a tiled matrix multiplication
 static bool isTiledMatmulGenericOp(Operation *op) {
   auto genericOp = dyn_cast<linalg::GenericOp>(op);
   if (!genericOp)
     return false;
 
-  // Check if it's marked as tiled
   if (!genericOp->hasAttr("tiled"))
     return false;
 
-  // Check inputs/outputs: 2 inputs and 1 output
   if (genericOp.getNumDpsInputs() != 2 || genericOp.getNumDpsInits() != 1)
     return false;
 
-  // Check iterator types: [parallel, parallel, reduction]
   auto iteratorTypes = genericOp.getIteratorTypesArray();
   if (iteratorTypes.size() != 3 ||
       iteratorTypes[0] != utils::IteratorType::parallel ||
@@ -68,7 +64,6 @@ struct ExtractSliceToSubViewPattern : public OpRewritePattern<tensor::ExtractSli
                                PatternRewriter &rewriter) const override {
     Value source = op.getSource();
 
-    // Check if the source is a tensor type
     auto tensorType = source.getType().dyn_cast<RankedTensorType>();
     if (!tensorType)
       return failure();
@@ -77,11 +72,9 @@ struct ExtractSliceToSubViewPattern : public OpRewritePattern<tensor::ExtractSli
     auto memrefType = MemRefType::get(tensorType.getShape(),
                                      tensorType.getElementType());
 
-    // Create ToMemrefOp to convert tensor to memref
     Value memref = rewriter.create<bufferization::ToMemrefOp>(
         op.getLoc(), memrefType, source);
 
-    // Create a subview operation
     auto subview = rewriter.create<memref::SubViewOp>(
         op.getLoc(),
         memref,
@@ -89,7 +82,6 @@ struct ExtractSliceToSubViewPattern : public OpRewritePattern<tensor::ExtractSli
         op.getMixedSizes(),
         op.getMixedStrides());
 
-    // Create tensor from memref for compatibility with existing IR
     auto resultType = op.getResult().getType().cast<RankedTensorType>();
     auto fromMemref = rewriter.create<bufferization::ToTensorOp>(
         op.getLoc(), resultType, subview);
@@ -108,7 +100,6 @@ struct InsertSliceToMemRefPattern : public OpRewritePattern<tensor::InsertSliceO
     Value source = op.getSource();
     Value dest = op.getDest();
 
-    // Check if source and dest are tensor types
     auto sourceTensorType = source.getType().dyn_cast<RankedTensorType>();
     auto destTensorType = dest.getType().dyn_cast<RankedTensorType>();
     if (!sourceTensorType || !destTensorType)
@@ -138,10 +129,8 @@ struct InsertSliceToMemRefPattern : public OpRewritePattern<tensor::InsertSliceO
         op.getMixedSizes(),
         op.getMixedStrides());
 
-    // Copy from source to the subview
     rewriter.create<memref::CopyOp>(op.getLoc(), sourceMemref, subview);
 
-    // Create a tensor from the modified memref for compatibility
     auto resultType = op.getResult().getType().cast<RankedTensorType>();
     auto result = rewriter.create<bufferization::ToTensorOp>(
         op.getLoc(), resultType, destMemref);
@@ -151,13 +140,13 @@ struct InsertSliceToMemRefPattern : public OpRewritePattern<tensor::InsertSliceO
   }
 };
 
-// Pattern to convert linalg.generic on tensors to linalg.generic on memrefs
+
 struct GenericTensorToMemRefPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(linalg::GenericOp op,
                                PatternRewriter &rewriter) const override {
-    // Only match tiled matmul operations
+
     if (!isTiledMatmulGenericOp(op))
       return failure();
 
@@ -197,9 +186,9 @@ struct GenericTensorToMemRefPattern : public OpRewritePattern<linalg::GenericOp>
     // Create new generic op on memrefs
     auto newGeneric = rewriter.create<linalg::GenericOp>(
         loc,
-        /*resultTypes=*/ArrayRef<Type>{},  // No tensor results for memref version
-        /*inputs=*/memrefInputs,
-        /*outputs=*/memrefOutputs,
+        ArrayRef<Type>{},  // Result type
+        memrefInputs,
+        memrefOutputs,
         op.getIndexingMapsArray(),
         op.getIteratorTypesArray());
 
@@ -210,7 +199,6 @@ struct GenericTensorToMemRefPattern : public OpRewritePattern<linalg::GenericOp>
     SmallVector<Value, 2> results;
     for (unsigned i = 0; i < memrefOutputs.size(); ++i) {
       Value output = memrefOutputs[i];
-      auto memrefType = output.getType().cast<MemRefType>();
 
       // Get the original result type
       auto resultTensorType = op->getResult(i).getType().cast<RankedTensorType>();
@@ -253,13 +241,11 @@ struct MatMulBufferizePass
 
     LLVM_DEBUG(llvm::dbgs() << "Applying MatMul bufferization\n");
 
-    // Set up patterns
     RewritePatternSet patterns(context);
     patterns.add<ExtractSliceToSubViewPattern>(context);
     patterns.add<InsertSliceToMemRefPattern>(context);
     patterns.add<GenericTensorToMemRefPattern>(context);
 
-    // Apply patterns
     (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
   }
 };

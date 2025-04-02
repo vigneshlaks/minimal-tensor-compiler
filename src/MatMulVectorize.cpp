@@ -1,4 +1,4 @@
-//===- MatMulVectorization.cpp - Vectorization pass for tiled MatMul ops ----===//
+//===- MatMulVectorize.cpp - Vectorization pass for tiled MatMul ops -----===//
 //
 // This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -40,19 +40,15 @@ static bool isTiledMatmulGenericOp(Operation *op) {
   if (!genericOp)
     return false;
 
-  // Check if this op has been tiled.
   if (!genericOp->hasAttr("tiled"))
     return false;
 
-  // Check inputs/outputs: 2 inputs and 1 output.
   if (genericOp.getNumDpsInputs() != 2 || genericOp.getNumDpsInits() != 1)
     return false;
 
-  // Check dimensions: matmul requires 3 loops (m, n, k).
   if (genericOp.getNumLoops() != 3)
     return false;
 
-  // Check iterator types: [parallel, parallel, reduction].
   auto iteratorTypes = genericOp.getIteratorTypesArray();
   if (iteratorTypes.size() != 3 ||
       iteratorTypes[0] != utils::IteratorType::parallel ||
@@ -63,8 +59,8 @@ static bool isTiledMatmulGenericOp(Operation *op) {
   return true;
 }
 
-struct InnerMatMulVectorizationPattern : public OpRewritePattern<linalg::GenericOp> {
-  InnerMatMulVectorizationPattern(MLIRContext *context)
+struct MatMulVectorizationPattern : public OpRewritePattern<linalg::GenericOp> {
+  MatMulVectorizationPattern(MLIRContext *context)
       : OpRewritePattern<linalg::GenericOp>(context) {}
 
   LogicalResult matchAndRewrite(linalg::GenericOp op,
@@ -72,33 +68,68 @@ struct InnerMatMulVectorizationPattern : public OpRewritePattern<linalg::Generic
     if (!isTiledMatmulGenericOp(op))
       return failure();
 
-    // Check if this op has already been vectorized.
     if (op->hasAttr("vectorized"))
       return failure();
 
-    // Apply a simple vectorization approach:
-    // Instead of trying to use linalg::vectorizeLinalgOp which doesn't exist in your version,
-    // we'll use lower-level vector operations directly
-
-    // 1. Get the body of the generic operation
     Block &body = op.getRegion().front();
 
-    // 2. Check if the body has the expected structure for matrix multiplication
     if (body.getOperations().size() < 3)
       return failure();
 
-    // Find multiply and add operations
     Operation *mulOp = nullptr;
     Operation *addOp = nullptr;
     for (Operation &bodyOp : body.getOperations()) {
-      if (isa<arith::MulFOp>(bodyOp))
+      if (isa<arith::MulFOp>(bodyOp)) {
         mulOp = &bodyOp;
+        llvm::errs() << "Found multiplication op: " << *mulOp << "\n";
+
+        llvm::errs() << "  Operands:\n";
+        for (Value operand : mulOp->getOperands()) {
+          llvm::errs() << "    " << operand << " : " << operand.getType() << "\n";
+        }
+      }
       else if (isa<arith::AddFOp>(bodyOp))
         addOp = &bodyOp;
     }
 
     if (!mulOp || !addOp)
       return failure();
+
+    Location loc = op.getLoc();
+
+    auto indexingMaps = op.getIndexingMapsArray();
+    auto outputMap = indexingMaps.back();
+    auto resultType = mlir::cast<MemRefType>(op.getOutputs()[0].getType());
+
+    SmallVector<int64_t, 4> shape;
+    for (auto dim : resultType.getShape())
+      shape.push_back(dim);
+
+    if (shape.size() < 2)
+      return failure();
+
+    int64_t mValue = shape[shape.size() - 2];
+    int64_t nValue = shape[shape.size() - 1];
+
+    auto inputType = mlir::cast<MemRefType>(op.getInputs()[0].getType());
+    SmallVector<int64_t, 4> inputShape;
+    for (auto dim : inputType.getShape())
+      inputShape.push_back(dim);
+
+    if (inputShape.size() < 2)
+      return failure();
+
+    int64_t kValue = inputShape[inputShape.size() - 1];
+
+    Type elementType = resultType.getElementType();
+
+    VectorType aVectorType = VectorType::get({mValue, kValue}, elementType);
+    VectorType bVectorType = VectorType::get({kValue, nValue}, elementType);
+    VectorType cVectorType = VectorType::get({mValue, nValue}, elementType);
+
+    op->setAttr("a_vector_type", TypeAttr::get(aVectorType));
+    op->setAttr("b_vector_type", TypeAttr::get(bVectorType));
+    op->setAttr("c_vector_type", TypeAttr::get(cVectorType));
 
     op->setAttr("vectorized", rewriter.getBoolAttr(true));
 
@@ -134,19 +165,9 @@ struct MatMulVectorizationPass
     LLVM_DEBUG(llvm::dbgs() << "Applying MatMul vectorization with vector size: "
                << vectorSize << "\n");
 
-    // Apply simple vectorization marking pattern
     {
       RewritePatternSet patterns(context);
-      patterns.add<InnerMatMulVectorizationPattern>(context);
-      if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
-        return signalPassFailure();
-      }
-    }
-
-    // Add vector-specific transformation patterns if needed
-    if (enableVectorOptimizations) {
-      RewritePatternSet patterns(context);
-      // Add vector optimizations here when ready
+      patterns.add<MatMulVectorizationPattern>(context);
       if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
         return signalPassFailure();
       }
@@ -156,11 +177,6 @@ struct MatMulVectorizationPass
   Option<int64_t> vectorSize{
       *this, "vector-size", llvm::cl::desc("Vector size for SIMD operations"),
       llvm::cl::init(8)};
-
-  Option<bool> enableVectorOptimizations{
-      *this, "enable-vector-optimizations",
-      llvm::cl::desc("Enable additional vector optimizations"),
-      llvm::cl::init(false)};
 };
 
 } // namespace

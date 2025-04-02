@@ -1,4 +1,13 @@
+
 build/
-*.whl
-mlir/
-__pycache__/
+cmake-build-debug/
+
+.idea/
+
+*.dist-info/
+
+*.o
+*.a
+*.so
+*.dylib
+.DS_Store

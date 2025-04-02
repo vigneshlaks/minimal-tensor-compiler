@@ -42,11 +42,9 @@ static bool isMatmulGenericOp(Operation *op) {
   if (genericOp.getNumDpsInputs() != 2 || genericOp.getNumDpsInits() != 1)
     return false;
 
-  // Check dimensions: matmul requires 3 loops (m, n, k).
   if (genericOp.getNumLoops() != 3)
     return false;
 
-  // Check iterator types: [parallel, parallel, reduction].
   auto iteratorTypes = genericOp.getIteratorTypesArray();
   if (iteratorTypes.size() != 3 ||
       iteratorTypes[0] != utils::IteratorType::parallel ||
@@ -54,19 +52,13 @@ static bool isMatmulGenericOp(Operation *op) {
       iteratorTypes[2] != utils::IteratorType::reduction)
     return false;
 
-  // Check indexing maps.
   auto indexingMaps = genericOp.getIndexingMapsArray();
   if (indexingMaps.size() != 3)
     return false;
 
-  // Create affine expressions for checking the maps.
   AffineExpr m, n, k;
   bindDims(op->getContext(), m, n, k);
 
-  // Expected maps for matmul:
-  // LHS map: (m, n, k) -> (m, k)
-  // RHS map: (m, n, k) -> (k, n)
-  // Result map: (m, n, k) -> (m, n)
   auto expectedLhsMap = AffineMap::get(3, 0, {m, k}, op->getContext());
   auto expectedRhsMap = AffineMap::get(3, 0, {k, n}, op->getContext());
   auto expectedResultMap = AffineMap::get(3, 0, {m, n}, op->getContext());
@@ -77,12 +69,10 @@ static bool isMatmulGenericOp(Operation *op) {
     return false;
   }
 
-  // Check the body to ensure it computes a*b + c.
   Block &body = genericOp.getRegion().front();
   if (body.getNumArguments() != 3)
     return false;
 
-  // Check for basic matmul operations: look for a multiply followed by an add.
   bool foundMul = false;
   bool foundAdd = false;
   bool foundYield = false;
@@ -109,22 +99,18 @@ struct MatMulTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     if (!isMatmulGenericOp(op))
       return failure();
 
-    // Check if this op has already been tiled.
     if (op->hasAttr("tiled"))
       return failure();
 
-    // Apply tiling transformation.
     FailureOr<linalg::TiledLinalgOp> tiledOp = linalg::tileLinalgOp(rewriter, op, options);
     if (failed(tiledOp))
       return failure();
 
-    // Mark the newly created op as tiled to avoid re-tiling.
     Operation *tiledOperation = tiledOp->op;
     if (auto tiledGenericOp = llvm::dyn_cast_or_null<linalg::GenericOp>(tiledOperation)) {
       tiledGenericOp -> setAttr("tiled", rewriter.getBoolAttr(true));
     }
 
-    // Replace the original op with the tiled result.
     rewriter.replaceOp(op, tiledOp->tensorResults);
 
     return success();
@@ -158,7 +144,6 @@ struct MatMulTilingPass
     func::FuncOp funcOp = getOperation();
     MLIRContext *context = &getContext();
 
-    // Create tiling options.
     SmallVector<int64_t, 3> tileSizes = {tileSizeM, tileSizeN, tileSizeK};
     linalg::LinalgTilingOptions tilingOptions;
     tilingOptions = tilingOptions.setTileSizes(tileSizes);
@@ -167,11 +152,9 @@ struct MatMulTilingPass
     LLVM_DEBUG(llvm::dbgs() << "Applying MatMul tiling with sizes: ["
                << tileSizeM << ", " << tileSizeN << ", " << tileSizeK << "]\n");
 
-    // Set up patterns.
     RewritePatternSet patterns(context);
     patterns.add<MatMulTilingPattern>(context, tilingOptions);
 
-    // Apply patterns.
     (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
   }
 
