@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements a pass for tiling matrix multiplication operations
-// that have been converted to linalg.generic operations.
+// This file implements a pass for tiling matrix multiplication operations,
+// specifically targeting linalg.matmul operations.
 //
 //===----------------------------------------------------------------------===//
 
@@ -18,7 +18,6 @@
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
-#include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
@@ -27,90 +26,36 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
-#define DEBUG_TYPE "matmul-tiling"
-
 using namespace mlir;
 
 namespace {
 
-static bool isMatmulGenericOp(Operation *op) {
-  auto genericOp = dyn_cast<linalg::GenericOp>(op);
-  if (!genericOp)
-    return false;
+// Define Tiling Patter
+struct MatMulOpTilingPattern : public OpRewritePattern<linalg::MatmulOp> {
+  MatMulOpTilingPattern(MLIRContext *context, const linalg::LinalgTilingOptions &options)
+      : OpRewritePattern<linalg::MatmulOp>(context), options(options) {}
 
-  // Check inputs/outputs: 2 inputs and 1 output.
-  if (genericOp.getNumDpsInputs() != 2 || genericOp.getNumDpsInits() != 1)
-    return false;
-
-  if (genericOp.getNumLoops() != 3)
-    return false;
-
-  auto iteratorTypes = genericOp.getIteratorTypesArray();
-  if (iteratorTypes.size() != 3 ||
-      iteratorTypes[0] != utils::IteratorType::parallel ||
-      iteratorTypes[1] != utils::IteratorType::parallel ||
-      iteratorTypes[2] != utils::IteratorType::reduction)
-    return false;
-
-  auto indexingMaps = genericOp.getIndexingMapsArray();
-  if (indexingMaps.size() != 3)
-    return false;
-
-  AffineExpr m, n, k;
-  bindDims(op->getContext(), m, n, k);
-
-  auto expectedLhsMap = AffineMap::get(3, 0, {m, k}, op->getContext());
-  auto expectedRhsMap = AffineMap::get(3, 0, {k, n}, op->getContext());
-  auto expectedResultMap = AffineMap::get(3, 0, {m, n}, op->getContext());
-
-  if (!(indexingMaps[0] == expectedLhsMap) &&
-    indexingMaps[1] == expectedRhsMap &&
-    indexingMaps[2] == expectedResultMap) {
-    return false;
-  }
-
-  Block &body = genericOp.getRegion().front();
-  if (body.getNumArguments() != 3)
-    return false;
-
-  bool foundMul = false;
-  bool foundAdd = false;
-  bool foundYield = false;
-
-  for (Operation &op : body) {
-    if (isa<arith::MulFOp>(op))
-      foundMul = true;
-    else if (isa<arith::AddFOp>(op))
-      foundAdd = true;
-    else if (isa<linalg::YieldOp>(op))
-      foundYield = true;
-  }
-
-  return foundMul && foundAdd && foundYield;
-}
-
-struct MatMulTilingPattern : public OpRewritePattern<linalg::GenericOp> {
-  MatMulTilingPattern(MLIRContext *context, const linalg::LinalgTilingOptions &options)
-      : OpRewritePattern<linalg::GenericOp>(context), options(options) {}
-
-  LogicalResult matchAndRewrite(linalg::GenericOp op,
+  // Define how we rewrite operation
+  LogicalResult matchAndRewrite(linalg::MatmulOp op,
                                PatternRewriter &rewriter) const override {
-    // Only apply to operations that represent matrix multiplication.
-    if (!isMatmulGenericOp(op))
-      return failure();
 
-    if (op->hasAttr("tiled"))
+    if (op->hasAttr("tiled")) {
       return failure();
-
-    FailureOr<linalg::TiledLinalgOp> tiledOp = linalg::tileLinalgOp(rewriter, op, options);
-    if (failed(tiledOp))
-      return failure();
-
-    Operation *tiledOperation = tiledOp->op;
-    if (auto tiledGenericOp = llvm::dyn_cast_or_null<linalg::GenericOp>(tiledOperation)) {
-      tiledGenericOp -> setAttr("tiled", rewriter.getBoolAttr(true));
     }
 
+    // Attempt to tile the operation
+    FailureOr<linalg::TiledLinalgOp> tiledOp = linalg::tileLinalgOp(rewriter, op, options);
+
+    if (failed(tiledOp)) {
+      return failure();
+    }
+
+    // Mark tile to avoid retiling attempt
+    if (tiledOp->op) {
+      tiledOp->op->setAttr("tiled", rewriter.getBoolAttr(true));
+    }
+
+    // Replace with tiled operation
     rewriter.replaceOp(op, tiledOp->tensorResults);
 
     return success();
@@ -127,48 +72,60 @@ struct MatMulTilingPass
   MatMulTilingPass() = default;
   MatMulTilingPass(const MatMulTilingPass &pass) : PassWrapper(pass) {}
 
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<linalg::LinalgDialect>();
-    registry.insert<scf::SCFDialect>();
-    registry.insert<tensor::TensorDialect>();
-    registry.insert<arith::ArithDialect>();
-  }
-
-  StringRef getArgument() const final { return "matmul-tiling"; }
-
-  StringRef getDescription() const final {
-    return "Tile matrix multiplication operations for better performance";
-  }
-
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     MLIRContext *context = &getContext();
 
-    SmallVector<int64_t, 3> tileSizes = {tileSizeM, tileSizeN, tileSizeK};
+    // Find all matmul operations in the function
+    funcOp.walk([&](linalg::MatmulOp matmulOp) {
+      matmulOp->print(llvm::dbgs());
+    });
+
+    // Determine tile sizes
+    SmallVector<int64_t, 3> tileSizes = {
+      tileSizeM,  // M dimension tile size
+      tileSizeN,  // N dimension tile size
+      tileSizeK   // K dimension tile size
+    };
+
+    // Create tiling options
     linalg::LinalgTilingOptions tilingOptions;
     tilingOptions = tilingOptions.setTileSizes(tileSizes);
-    tilingOptions = tilingOptions.setLoopType(linalg::LinalgTilingLoopType::Loops);
 
-    LLVM_DEBUG(llvm::dbgs() << "Applying MatMul tiling with sizes: ["
-               << tileSizeM << ", " << tileSizeN << ", " << tileSizeK << "]\n");
+    // Configure loop type
+    if (useScfFor) {
+      llvm::dbgs() << "Using SCF loops for tiling\n";
+    } else {
+      tilingOptions = tilingOptions.setLoopType(linalg::LinalgTilingLoopType::ParallelLoops);
+      llvm::dbgs() << "Using parallel loops for tiling\n";
+    }
 
+    // Create rewrite patterns
     RewritePatternSet patterns(context);
-    patterns.add<MatMulTilingPattern>(context, tilingOptions);
+    patterns.add<MatMulOpTilingPattern>(context, tilingOptions);
 
+    // Apply the patterns
     (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+
+    // Print completion
+    llvm::dbgs() << "Completed MatMul Tiling Pass\n";
   }
 
   Option<int64_t> tileSizeM{
       *this, "tile-size-m", llvm::cl::desc("Tile size for M dimension (rows of first matrix)"),
-      llvm::cl::init(64)};
+      llvm::cl::init(32)};
 
   Option<int64_t> tileSizeN{
       *this, "tile-size-n", llvm::cl::desc("Tile size for N dimension (columns of second matrix)"),
-      llvm::cl::init(64)};
+      llvm::cl::init(32)};
 
   Option<int64_t> tileSizeK{
       *this, "tile-size-k", llvm::cl::desc("Tile size for K dimension (inner dimension)"),
-      llvm::cl::init(64)};
+      llvm::cl::init(32)};
+
+  Option<bool> useScfFor{
+      *this, "use-scf-for", llvm::cl::desc("Use scf.for instead of scf.parallel for tiling"),
+      llvm::cl::init(true)};
 };
 
 } // namespace
