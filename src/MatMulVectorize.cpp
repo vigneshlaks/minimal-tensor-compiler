@@ -168,7 +168,7 @@ struct MatMulVectorizationPass
     {
       RewritePatternSet patterns(context);
       patterns.add<MatMulVectorizationPattern>(context);
-      if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
+      if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
         return signalPassFailure();
       }
     }
