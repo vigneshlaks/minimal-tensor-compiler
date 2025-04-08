@@ -30,7 +30,7 @@ using namespace mlir;
 
 namespace {
 
-// Define Tiling Patter
+// Define Tiling Pattern
 struct MatMulOpTilingPattern : public OpRewritePattern<linalg::MatmulOp> {
   MatMulOpTilingPattern(MLIRContext *context, const linalg::LinalgTilingOptions &options)
       : OpRewritePattern<linalg::MatmulOp>(context), options(options) {}
@@ -72,6 +72,10 @@ struct MatMulTilingPass
   MatMulTilingPass() = default;
   MatMulTilingPass(const MatMulTilingPass &pass) : PassWrapper(pass) {}
 
+  StringRef getArgument() const override {
+    return "minimal-matmul-tiling";
+  }
+
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     MLIRContext *context = &getContext();
@@ -83,9 +87,9 @@ struct MatMulTilingPass
 
     // Determine tile sizes
     SmallVector<int64_t, 3> tileSizes = {
-      tileSizeM,  // M dimension tile size
-      tileSizeN,  // N dimension tile size
-      tileSizeK   // K dimension tile size
+      tileSizeM,
+      tileSizeN,
+      tileSizeK
     };
 
     // Create tiling options
@@ -100,14 +104,11 @@ struct MatMulTilingPass
       llvm::dbgs() << "Using parallel loops for tiling\n";
     }
 
-    // Create rewrite patterns
     RewritePatternSet patterns(context);
     patterns.add<MatMulOpTilingPattern>(context, tilingOptions);
 
-    // Apply the patterns
     (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 
-    // Print completion
     llvm::dbgs() << "Completed MatMul Tiling Pass\n";
   }
 

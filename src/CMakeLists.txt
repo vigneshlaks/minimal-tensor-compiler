@@ -4,7 +4,7 @@ add_mlir_dialect_library(
 
     ConvToLinalg.cpp
 
-    MatMultoLinalg.cpp
+    #    ../MatMultoLinalg.cpp
     MatMulTiling.cpp
     MatMulBufferize.cpp
     MatMulVectorize.cpp

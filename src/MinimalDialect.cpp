@@ -17,6 +17,11 @@
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Transforms/DialectConversion.h"
+
 
 using namespace mlir;
 using namespace mlir::minimal;
@@ -26,6 +31,7 @@ using namespace mlir::minimal;
 //===----------------------------------------------------------------------===//
 // Minimal dialect.
 //===----------------------------------------------------------------------===//
+
 
 void MinimalDialect::initialize() {
   addOperations<
@@ -44,6 +50,7 @@ void MinimalDialect::initialize() {
 
 namespace mlir::minimal {
 #define GEN_PASS_DEF_MINIMALSWITCHBARFOO
+#define GEN_PASS_DEF_MATMULTOLINALG
 #include "MinimalPasses.h.inc"
 
 //===----------------------------------------------------------------------===//
@@ -77,7 +84,69 @@ public:
       signalPassFailure();
   }
 };
-} // namespace
+
+
+struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
+  using OpRewritePattern<MatMulOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(MatMulOp op, PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Value lhs = op.getOperand(0);
+    Value rhs = op.getOperand(1);
+
+    // Get the result type using mlir::cast.
+    auto resultType = mlir::cast<RankedTensorType>(op.getResult().getType());
+
+    // Create a zero-filled tensor for output.
+    Value zero = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(resultType.getElementType()));
+    Value emptyTensor = rewriter.create<tensor::EmptyOp>(
+        loc, resultType.getShape(), resultType.getElementType());
+    Value filledTensor = rewriter.create<linalg::FillOp>(
+        loc, ValueRange{zero}, ValueRange{emptyTensor}).getResult(0);
+
+    // Create the linalg.matmul operation with properly separated inputs and outputs
+    Value newOp = rewriter.create<linalg::MatmulOp>(
+        loc,
+        resultType,
+        ValueRange{lhs, rhs},    // inputs (A and B matrices)
+        ValueRange{filledTensor} // output (C matrix)
+    ).getResult(0);
+
+    rewriter.replaceOp(op, newOp);
+    return success();
+  }
+};
+
+  struct MatMulToLinalg : public impl::MatMulToLinalgBase<MatMulToLinalg> {
+    void getDependentDialects(DialectRegistry &registry) const override {
+      registry.insert<linalg::LinalgDialect, tensor::TensorDialect, arith::ArithDialect>();
+    }
+
+    void runOnOperation() override {
+      MLIRContext *context = &getContext();
+      RewritePatternSet patterns(context);
+      patterns.add<MatMulToLinalgPattern>(context);
+
+      // Set up a conversion target that marks MatMulOp as illegal.
+      ConversionTarget target(*context);
+      target.addLegalDialect<linalg::LinalgDialect, tensor::TensorDialect, arith::ArithDialect, func::FuncDialect>();
+      target.addIllegalOp<MatMulOp>();
+
+      if (failed(applyPartialConversion(getOperation(), target, std::move(patterns))))
+        signalPassFailure();
+    }
+  };;
+
+
+
+
+}
+
+std::unique_ptr<mlir::Pass> createMatMulToLinalgPass() {
+  return std::make_unique<MatMulToLinalg>();
+}
+
 } // namespace mlir::minimal
 
 //===----------------------------------------------------------------------===//
