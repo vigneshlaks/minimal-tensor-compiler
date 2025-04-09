@@ -158,7 +158,7 @@ def MatMulOp : Minimal_Op<"matmul", [Pure]> {
 }
 
 // MatMulToLinalg pass
-def MatMulToLinalg: Pass<"minimal-matmul-to-linalg", "::mlir::func::FuncOp"> {
+def MatMulToLinalg: Pass<"matmul-to-linalg", "::mlir::func::FuncOp"> {
   let summary = "Convert Minimal MatMul operations to Linalg operations";
   let description = [{
     This pass lowers minimal.matmul operations to linalg.generic operations
@@ -180,7 +180,7 @@ def MatMulToLinalg: Pass<"minimal-matmul-to-linalg", "::mlir::func::FuncOp"> {
 }
 
 // MatMulTiling pass
-def MatMulTiling: Pass<"matmul-tiling", "::mlir::func::FuncOp"> {
+def MatMulTiling: Pass<"linalg-tiling", "::mlir::func::FuncOp"> {
   let summary = "Tile matrix multiplication operations";
   let description = [{
     This pass tiles matrix multiplication operations that have been lowered to

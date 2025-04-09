@@ -137,10 +137,6 @@ struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
         signalPassFailure();
     }
   };;
-
-
-
-
 }
 
 std::unique_ptr<mlir::Pass> createMatMulToLinalgPass() {

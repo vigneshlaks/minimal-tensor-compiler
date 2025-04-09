@@ -8,10 +8,13 @@
 //
 // This file implements a pass for tiling matrix multiplication operations,
 // specifically targeting linalg.matmul operations.
-//
+// This version uses TableGen-generated pass options.
 //===----------------------------------------------------------------------===//
 
-#include "../include/MinimalDialect.h"
+// Include the dialect header that includes TableGen declarations.
+#include "MinimalDialect.h"
+
+// Standard MLIR and LLVM includes.
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -26,38 +29,37 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
-using namespace mlir;
 
-namespace {
 
-// Define Tiling Pattern
+// Define and include the TableGen-generated pass declarations.
+// Make sure the macro is defined before including the generated file.
+
+namespace mlir {
+namespace minimal {
+
+#define GEN_PASS_DEF_MATMULTILING
+#include "MinimalPasses.h.inc"
+
+// Tiling pattern that rewrites linalg.matmul into tiled form.
 struct MatMulOpTilingPattern : public OpRewritePattern<linalg::MatmulOp> {
   MatMulOpTilingPattern(MLIRContext *context, const linalg::LinalgTilingOptions &options)
       : OpRewritePattern<linalg::MatmulOp>(context), options(options) {}
 
-  // Define how we rewrite operation
-  LogicalResult matchAndRewrite(linalg::MatmulOp op,
-                               PatternRewriter &rewriter) const override {
-
-    if (op->hasAttr("tiled")) {
+  LogicalResult matchAndRewrite(linalg::MatmulOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("tiled"))
       return failure();
-    }
 
-    // Attempt to tile the operation
+    // Tile the operation according to the provided tiling options.
     FailureOr<linalg::TiledLinalgOp> tiledOp = linalg::tileLinalgOp(rewriter, op, options);
-
-    if (failed(tiledOp)) {
+    if (failed(tiledOp))
       return failure();
-    }
 
-    // Mark tile to avoid retiling attempt
-    if (tiledOp->op) {
+    // Mark the tiled op so it is not retiled.
+    if (tiledOp->op)
       tiledOp->op->setAttr("tiled", rewriter.getBoolAttr(true));
-    }
 
-    // Replace with tiled operation
+    // Replace the original op with the tiled op's tensor results.
     rewriter.replaceOp(op, tiledOp->tensorResults);
-
     return success();
   }
 
@@ -65,77 +67,45 @@ private:
   linalg::LinalgTilingOptions options;
 };
 
-struct MatMulTilingPass
-    : public PassWrapper<MatMulTilingPass, OperationPass<func::FuncOp>> {
+
+struct MatMulTilingPass : public impl::MatMulTilingBase<MatMulTilingPass> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MatMulTilingPass)
 
+  // Default constructors are provided by the base class.
   MatMulTilingPass() = default;
-  MatMulTilingPass(const MatMulTilingPass &pass) : PassWrapper(pass) {}
-
-  StringRef getArgument() const override {
-    return "minimal-matmul-tiling";
-  }
+  MatMulTilingPass(const MatMulTilingPass &pass) : impl::MatMulTilingBase<MatMulTilingPass>(pass) {}
 
   void runOnOperation() override {
+
     func::FuncOp funcOp = getOperation();
     MLIRContext *context = &getContext();
 
-    // Find all matmul operations in the function
-    funcOp.walk([&](linalg::MatmulOp matmulOp) {
-      matmulOp->print(llvm::dbgs());
-    });
+    // Use the TableGen-generated options for tiling.
+    // tileSizeM, tileSizeN, and tileSizeK are available as member variables inherited from the base.
+    auto opts = MatMulTilingOptions{};
+    SmallVector<int64_t, 3> tileSizes{ opts.tileSizeM, opts.tileSizeN, opts.tileSizeK };
 
-    // Determine tile sizes
-    SmallVector<int64_t, 3> tileSizes = {
-      tileSizeM,
-      tileSizeN,
-      tileSizeK
-    };
-
-    // Create tiling options
+    // Configure tiling options based on command-line (or default) values.
     linalg::LinalgTilingOptions tilingOptions;
     tilingOptions = tilingOptions.setTileSizes(tileSizes);
 
-    // Configure loop type
-    if (useScfFor) {
-      llvm::dbgs() << "Using SCF loops for tiling\n";
-    } else {
-      tilingOptions = tilingOptions.setLoopType(linalg::LinalgTilingLoopType::ParallelLoops);
-      llvm::dbgs() << "Using parallel loops for tiling\n";
-    }
-
+    // Create a pattern set and add the tiling pattern.
     RewritePatternSet patterns(context);
     patterns.add<MatMulOpTilingPattern>(context, tilingOptions);
-
     (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 
     llvm::dbgs() << "Completed MatMul Tiling Pass\n";
   }
-
-  Option<int64_t> tileSizeM{
-      *this, "tile-size-m", llvm::cl::desc("Tile size for M dimension (rows of first matrix)"),
-      llvm::cl::init(32)};
-
-  Option<int64_t> tileSizeN{
-      *this, "tile-size-n", llvm::cl::desc("Tile size for N dimension (columns of second matrix)"),
-      llvm::cl::init(32)};
-
-  Option<int64_t> tileSizeK{
-      *this, "tile-size-k", llvm::cl::desc("Tile size for K dimension (inner dimension)"),
-      llvm::cl::init(32)};
-
-  Option<bool> useScfFor{
-      *this, "use-scf-for", llvm::cl::desc("Use scf.for instead of scf.parallel for tiling"),
-      llvm::cl::init(true)};
 };
 
-} // namespace
+} // end anonymous namespace
+}
 
 namespace mlir {
 namespace minimal {
 
 std::unique_ptr<Pass> createMatMulTilingPass() {
-  return std::make_unique<MatMulTilingPass>();
+  return std::make_unique<minimal::MatMulTilingPass>();
 }
 
 } // namespace minimal
