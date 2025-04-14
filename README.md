@@ -1,39 +1,75 @@
 # Minimal Tensor Compiler
 
-This repo demos a slightly unconventional way to bootstrap an MLIR project:
+## Project Structure
 
-1. It relies on https://makslevental.github.io/wheels for the upstream distribution of MLIR
-2. It smashes all the include headers into a single header [include/MinimalDialect.h](include/MinimalDialect.h) and all the tablegen into a single [include/MinimalDialect.td](include/MinimalDialect.td) and *also emits all the tablegen into the source tree itself*;
-   1. I think seeing the emitted tablegen is useful for demystifying how MLIR works
-3. It smashes all the implementation into a single [src/MinimalDialect.cpp](src/MinimalDialect.cpp)
-4. Python bindings @ [python/mmlir/dialects](python/mmlir/dialects) are arranged to have generated artifacts to be dumped in place.
+1. **Graph Representation**
+   - JSON parser for graph input
+   - Graph processing and validation
 
-It is primarily meant to be used as a learning aid (e.g., for understanding which parts of the upstream CMake are essential and which aren't) and not as a germ/seed/cookiecutter for a production quality project.
+2. **High-Level Optimization (HLO)**
+   - Basic operation fusion
+   - Graph-level optimizations
 
-# Building and exercising
+3. **MLIR Lowering**
+   - Tiling transformations
+   - GPU mapping
+   - Bufferization
+   - Kernel generation (Triton/NVVM/PTX)
 
-You can either use CMake to build and run lit tests or you can `pip install` and run [test/python/smoketest.py](test/python/smoketest.py).
-Note, `pip install -r requirements.txt` is required either way and `pip download mlir -f https://makslevental.github.io/wheels` in order to get the `mlir` distribution package.
+5. **End-to-End Examples**
+   - Small 2-3 op network examples
+   - Generated code at each compilation stage
 
-A minimal CMake might look like:
+## Current Focus
 
-```shell 
-pip install -r requirements.txt
-pip download mlir -f https://makslevental.github.io/wheels
-unzip mlir-*.whl
+- HLO Implementation
+   - Creating and parsing computation graphs
+   - Implementing operator fusion
+- Understanding Triton Landscape
+   - Mirror how implementation is handled within torch.compile() 
+## To-Do
 
-cmake -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DPython3_EXECUTABLE=$(which python) \
-  -DCMAKE_PREFIX_PATH=$PWD/mlir \
-  -DLLVM_EXTERNAL_LIT=$(which lit) \
-  -B build \
-  -S $PWD
-```
+- Complete HLO implementation
+- Understand and implement Triton lowering
+- Study and incorporate concepts from relevant papers:
+   - Polyhedral compilers
+   - Halide
+   - Tiramisu
+   - TVM
+   - CAssette
+   - Tensor Comprehensions
+   - BLAS implementations (GotoBLAS, BLIS)
 
-and then just do `pushd build && ninja check-minimal && popd`.
 
-Alternatively you can `pip install`, e.g., `pip install . -v --no-build-isolation` and then `pushd test/python && pthon smoketest.py && popd`.
+## Philosophy
 
-If something isn't working you're probably missing `ninja` or `CMake` or you haven't done `pip install -r requirements.txt`.
-My recommendation is to go to the tests/GitHub actions and see how they're run since they run consistently.
+- Core passes implemented in C++
+- MLIR used for IRs
+- Elucidate transformations through generated mlir assembly
+
+## Resources
+
+### Compiler Design
+- MLIR Toy Compiler documentation
+- Jeremy Kun's MLIR Tutorial Series
+
+### Deep Learning Compilers
+- Quidditch - End to End Deep Learning Compiler
+- Torch MLIR
+- Buddy Compiler
+
+### GPU Computing
+- CUDA architecture
+- Triton dialect documentation
+
+## Getting Started
+
+*TBD - Instructions for building and running the compiler will be added as implementation progresses*
+
+## Contributing
+
+This project is designed as a learning aid. Contributions that improve clarity, documentation, or add educational examples are especially welcome.
+
+## License
+
+*TBD*
