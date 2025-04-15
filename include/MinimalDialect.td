@@ -131,7 +131,6 @@ def Minimal_CustomType : Minimal_Type<"Custom", "custom"> {
     let assemblyFormat = "`<` $value `>`";
 }
 
-// Matrix Multiplication Operation
 def MatMulOp : Minimal_Op<"matmul", [Pure]> {
   let summary = "Matrix multiplication operation";
   let description = [{
@@ -156,6 +155,55 @@ def MatMulOp : Minimal_Op<"matmul", [Pure]> {
     $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($output)
   }];
 }
+
+def Minimal_MatmulOp : Minimal_Op<"matmul", [Pure]> {
+  let summary = "Matrix multiplication operation";
+  let description = [{
+    Performs matrix multiplication between two tensors.
+
+    Example:
+    ```mlir
+    %c = minimal.matmul %a, %b : tensor<1x784xf32>, tensor<784x128xf32> -> tensor<1x128xf32>
+    ```
+  }];
+
+  let arguments = (ins
+    RankedTensorOf<[AnyFloat]>:$lhs,
+    RankedTensorOf<[AnyFloat]>:$rhs
+  );
+
+  let results = (outs
+    RankedTensorOf<[AnyFloat]>:$output
+  );
+
+  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($output)";
+
+  // Custom verifier to check matrix multiplication compatibility
+  let hasVerifier = 1;
+}
+
+def Minimal_SoftmaxOp : Minimal_Op<"softmax", [Pure, SameOperandsAndResultType]> {
+  let summary = "Softmax normalization";
+  let description = [{
+    Applies softmax function along the last dimension of the input tensor.
+
+    Example:
+    ```mlir
+    %b = minimal.softmax %a : tensor<1x10xf32> -> tensor<1x10xf32>
+    ```
+  }];
+
+  let arguments = (ins
+    TensorOf<[AnyFloat]>:$input
+  );
+
+  let results = (outs
+    TensorOf<[AnyFloat]>:$output
+  );
+
+  let assemblyFormat = "$input attr-dict `:` type($input) `->` type($output)";
+}
+
 
 // MatMulToLinalg pass
 def MatMulToLinalg: Pass<"matmul-to-linalg", "::mlir::func::FuncOp"> {
