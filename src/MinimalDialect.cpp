@@ -45,12 +45,17 @@ void MinimalDialect::initialize() {
 // Minimal ops
 //===----------------------------------------------------------------------===//
 
+
 #define GET_OP_CLASSES
 #include "MinimalOps.cpp.inc"
 
+
 namespace mlir::minimal {
-#define GEN_PASS_DEF_MINIMALSWITCHBARFOO
+
+// Import passes
 #define GEN_PASS_DEF_MATMULTOLINALG
+#include "MinimalPasses.h.inc"
+#define GEN_PASS_DEF_RELUFUSION
 #include "MinimalPasses.h.inc"
 
 //===----------------------------------------------------------------------===//
@@ -58,33 +63,6 @@ namespace mlir::minimal {
 //===----------------------------------------------------------------------===//
 
 namespace {
-class MinimalSwitchBarFooRewriter : public OpRewritePattern<func::FuncOp> {
-public:
-  using OpRewritePattern<func::FuncOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(func::FuncOp op,
-                                PatternRewriter &rewriter) const final {
-    if (op.getSymName() == "bar") {
-      rewriter.modifyOpInPlace(op, [&op]() { op.setSymName("foo"); });
-      return success();
-    }
-    return failure();
-  }
-};
-
-class MinimalSwitchBarFoo
-    : public impl::MinimalSwitchBarFooBase<MinimalSwitchBarFoo> {
-public:
-  using impl::MinimalSwitchBarFooBase<
-      MinimalSwitchBarFoo>::MinimalSwitchBarFooBase;
-  void runOnOperation() final {
-    RewritePatternSet patterns(&getContext());
-    patterns.add<MinimalSwitchBarFooRewriter>(&getContext());
-    FrozenRewritePatternSet patternSet(std::move(patterns));
-    if (failed(applyPatternsAndFoldGreedily(getOperation(), patternSet)))
-      signalPassFailure();
-  }
-};
-
 
 struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
   using OpRewritePattern<MatMulOp>::OpRewritePattern;
@@ -109,8 +87,8 @@ struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
     Value newOp = rewriter.create<linalg::MatmulOp>(
         loc,
         resultType,
-        ValueRange{lhs, rhs},    // inputs (A and B matrices)
-        ValueRange{filledTensor} // output (C matrix)
+        ValueRange{lhs, rhs},
+        ValueRange{filledTensor}
     ).getResult(0);
 
     rewriter.replaceOp(op, newOp);
@@ -136,14 +114,69 @@ struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
       if (failed(applyPartialConversion(getOperation(), target, std::move(patterns))))
         signalPassFailure();
     }
-  };;
+  };
 }
+
+namespace {
+struct MatMulReluFusionPattern : public OpRewritePattern<minimal::ReluOp> {
+  using OpRewritePattern<minimal::ReluOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(minimal::ReluOp reluOp,
+                               PatternRewriter &rewriter) const override {
+    // Check if the input to ReLU is a MatMul operation
+    auto matmulOp = reluOp.getInput().getDefiningOp<minimal::MatMulOp>();
+    if (!matmulOp)
+      return failure();
+
+    // Check if the MatMul has other uses
+    if (!matmulOp.getResult().hasOneUse())
+      return failure();
+
+    // Create a fused operation at the location of the MatMul
+    Location loc = matmulOp.getLoc();
+    Value fusedOp = rewriter.create<minimal::FusedMatMulReluOp>(
+        loc,
+        reluOp.getType(),
+        matmulOp.getLhs(),
+        matmulOp.getRhs());
+
+    // Replace ReLU with the fused operation result
+    rewriter.replaceOp(reluOp, fusedOp);
+
+    // The original MatMul is now dead as its only use was replaced
+    rewriter.eraseOp(matmulOp);
+
+    return success();
+  }
+};
+
+struct ReluFusion : public impl::ReluFusionBase<ReluFusion> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<minimal::MinimalDialect>();
+  }
+
+  void runOnOperation() override {
+    MLIRContext *context = &getContext();
+    RewritePatternSet patterns(context);
+    patterns.add<MatMulReluFusionPattern>(context);
+
+    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
+      signalPassFailure();
+  }
+};
+}
+
+std::unique_ptr<mlir::Pass> createReluFusionPass() {
+  return std::make_unique<ReluFusion>();
+}
+
 
 std::unique_ptr<mlir::Pass> createMatMulToLinalgPass() {
   return std::make_unique<MatMulToLinalg>();
 }
 
 } // namespace mlir::minimal
+
 
 //===----------------------------------------------------------------------===//
 // Minimal types

@@ -1,9 +1,6 @@
 add_mlir_dialect_library(
     MLIRMinimal
     MinimalDialect.cpp
-
-    ConvToLinalg.cpp
-
     #    ../MatMultoLinalg.cpp
     MatMulTiling.cpp
     MatMulBufferize.cpp

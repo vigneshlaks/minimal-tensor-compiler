@@ -28,8 +28,8 @@
 
 namespace mlir::minimal {
 
-// Conv
-std::unique_ptr<mlir::Pass> createConvToLinalgPass();
+std::unique_ptr<mlir::Pass> createReluFusionPass();
+
 
 // Matmul
 std::unique_ptr<mlir::Pass> createMatMulToLinalgPass();
