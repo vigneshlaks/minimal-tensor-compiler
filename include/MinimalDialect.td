@@ -67,14 +67,14 @@ def MatMulOp : Minimal_Op<"matmul", [Pure]> {
   }];
 }
 
-def Minimal_SoftmaxOp : Minimal_Op<"softmax", [Pure, SameOperandsAndResultType]> {
-  let summary = "Softmax normalization";
+def Minimal_ReluOp : Minimal_Op<"relu", [Pure, SameOperandsAndResultType]> {
+  let summary = "ReLU activation function";
   let description = [{
-    Applies softmax function along the last dimension of the input tensor.
+    Applies ReLU (max(0, x)) to each element of the input tensor.
 
     Example:
     ```mlir
-    %b = minimal.softmax %a : tensor<1x10xf32> -> tensor<1x10xf32>
+    %b = minimal.relu %a : tensor<1x128xf32> -> tensor<1x128xf32>
     ```
   }];
 
@@ -89,58 +89,16 @@ def Minimal_SoftmaxOp : Minimal_Op<"softmax", [Pure, SameOperandsAndResultType]>
   let assemblyFormat = "$input attr-dict `:` type($input) `->` type($output)";
 }
 
-def Minimal_FusedMatMulReluOp : Minimal_Op<"fused_matmul_relu", [Pure]> {
-  let summary = "Fused matrix multiplication and ReLU operation";
-  let description = [{
-    Performs matrix multiplication followed by ReLU activation in a single operation.
-  }];
-
-  let arguments = (ins
-    RankedTensorOf<[AnyFloat]>:$lhs,
-    RankedTensorOf<[AnyFloat]>:$rhs
-  );
-
-  let results = (outs
-    RankedTensorOf<[AnyFloat]>:$output
-  );
-
-  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($output)";
-}
-
 //===----------------------------------------------------------------------===//
 // Pass definition.
 //===----------------------------------------------------------------------===//
 
-// Operator Fusion
-def ReluFusion: Pass<"relu-fusion", "::mlir::func::FuncOp"> {
-    let summary = "Apply Relu Fusion";
-
-    let description = [{
-        Join up Matmul and Relu
-    }];
-
-    let constructor = "mlir::minimal::createReluFusionPass()";
-
-//    let dependenetDialects = [
-//        ""
-//    ];
-}
-
-// MatMulToLinalg pass
-def MatMulToLinalg: Pass<"matmul-to-linalg", "::mlir::func::FuncOp"> {
-  let summary = "Convert Minimal MatMul operations to Linalg operations";
+def NNLowering: Pass<"nn-lowering", "::mlir::func::FuncOp"> {
+  let summary = "Lower minimal relu and matmul to Linalg";
   let description = [{
-    This pass lowers minimal.matmul operations to linalg.generic operations
-    representing matrix multiplication.
-
-    Example:
-    ```mlir
-    %C = minimal.matmul %A, %B : tensor<4x8xf32>, tensor<8x16xf32> -> tensor<4x16xf32>
-    ```
-
-    Gets converted to a linalg.generic operation.
+    This pass lowers neural network operations to linalg.generic operations.
   }];
-  let constructor = "mlir::minimal::createMatMulToLinalgPass()";
+  let constructor = "mlir::minimal::createNNToLinalgPass()";
   let dependentDialects = [
     "mlir::linalg::LinalgDialect",
     "mlir::tensor::TensorDialect",
@@ -242,28 +200,6 @@ def Minimal_CustomType : Minimal_Type<"Custom", "custom"> {
     let description = "Custom type in minimal dialect";
     let parameters = (ins StringRefParameter<"the custom value">:$value);
     let assemblyFormat = "`<` $value `>`";
-}
-
-def Minimal_ReluOp : Minimal_Op<"relu", [Pure, SameOperandsAndResultType]> {
-  let summary = "ReLU activation function";
-  let description = [{
-    Applies ReLU (max(0, x)) to each element of the input tensor.
-
-    Example:
-    ```mlir
-    %b = minimal.relu %a : tensor<1x128xf32> -> tensor<1x128xf32>
-    ```
-  }];
-
-  let arguments = (ins
-    TensorOf<[AnyFloat]>:$input
-  );
-
-  let results = (outs
-    TensorOf<[AnyFloat]>:$output
-  );
-
-  let assemblyFormat = "$input attr-dict `:` type($input) `->` type($output)";
 }
 
 

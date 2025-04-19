@@ -51,52 +51,94 @@ void MinimalDialect::initialize() {
 
 
 namespace mlir::minimal {
-
-// Import passes
-#define GEN_PASS_DEF_MATMULTOLINALG
-#include "MinimalPasses.h.inc"
-#define GEN_PASS_DEF_RELUFUSION
-#include "MinimalPasses.h.inc"
-
 //===----------------------------------------------------------------------===//
 // Minimal passes
 //===----------------------------------------------------------------------===//
 
 namespace {
 
-struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
-  using OpRewritePattern<MatMulOp>::OpRewritePattern;
+  
 
-  LogicalResult matchAndRewrite(MatMulOp op, PatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-    Value lhs = op.getOperand(0);
-    Value rhs = op.getOperand(1);
+  struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
+    using OpRewritePattern<MatMulOp>::OpRewritePattern;
+  
+    LogicalResult matchAndRewrite(MatMulOp op, PatternRewriter &rewriter) const override {
+      Location loc = op.getLoc();
+      Value lhs = op.getLhs();
+      Value rhs = op.getRhs();
+  
+      // Get the result type using mlir::cast.
+      auto resultType = mlir::cast<RankedTensorType>(op.getResult().getType());
+  
+      // Create a zero-filled tensor for output.
+      Value zero = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getZeroAttr(resultType.getElementType()));
+      Value emptyTensor = rewriter.create<tensor::EmptyOp>(
+          loc, resultType.getShape(), resultType.getElementType());
+      Value filledTensor = rewriter.create<linalg::FillOp>(
+          loc, ValueRange{zero}, ValueRange{emptyTensor}).getResult(0);
+  
+      // Create the linalg.matmul operation with properly separated inputs and outputs
+      Value newOp = rewriter.create<linalg::MatmulOp>(
+          loc,
+          resultType,
+          ValueRange{lhs, rhs},
+          ValueRange{filledTensor}
+      ).getResult(0);
+  
+      rewriter.replaceOp(op, newOp);
+      return success();
+    }
+  };
 
-    // Get the result type using mlir::cast.
-    auto resultType = mlir::cast<RankedTensorType>(op.getResult().getType());
+  struct ReluToLinalgPattern : public OpRewritePattern<ReluOp> {
+    using OpRewritePattern<ReluOp>::OpRewritePattern;
 
-    // Create a zero-filled tensor for output.
-    Value zero = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getZeroAttr(resultType.getElementType()));
-    Value emptyTensor = rewriter.create<tensor::EmptyOp>(
-        loc, resultType.getShape(), resultType.getElementType());
-    Value filledTensor = rewriter.create<linalg::FillOp>(
-        loc, ValueRange{zero}, ValueRange{emptyTensor}).getResult(0);
+    LogicalResult matchAndRewrite(ReluOp op, PatternRewriter &rewriter) const override {
+      Location loc = op.getLoc();
+      Value input = op.getInput();
 
-    // Create the linalg.matmul operation with properly separated inputs and outputs
-    Value newOp = rewriter.create<linalg::MatmulOp>(
-        loc,
-        resultType,
-        ValueRange{lhs, rhs},
-        ValueRange{filledTensor}
-    ).getResult(0);
+      auto resultType = mlir::cast<RankedTensorType>(op.getResult().getType());
 
-    rewriter.replaceOp(op, newOp);
-    return success();
-  }
-};
+      Value zero = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getZeroAttr(resultType.getElementType()));
 
-  struct MatMulToLinalg : public impl::MatMulToLinalgBase<MatMulToLinalg> {
+      Value emptyTensor = rewriter.create<tensor::EmptyOp>(
+          loc, resultType.getShape(), resultType.getElementType());
+        
+      SmallVector<AffineMap> indexingMaps = {
+        AffineMap::getMultiDimIdentityMap(resultType.getRank(), rewriter.getContext()),
+        AffineMap::getMultiDimIdentityMap(resultType.getRank(), rewriter.getContext())
+      };
+
+      SmallVector<utils::IteratorType> iteratorTypes(resultType.getRank(), 
+                                                   utils::IteratorType::parallel);
+      
+
+      auto genericOp = rewriter.create<linalg::GenericOp>(
+          loc,
+          TypeRange{resultType},
+          ValueRange{input},
+          ValueRange{emptyTensor},
+          indexingMaps,
+          iteratorTypes,
+          [&](OpBuilder &nestedBuilder, Location nestedLoc, ValueRange args) {
+
+            Value inputVal = args[0];
+            Value maxOp = nestedBuilder.create<arith::MaximumFOp>(nestedLoc, inputVal, zero);
+            nestedBuilder.create<linalg::YieldOp>(nestedLoc, maxOp);
+          }
+      );
+      
+      rewriter.replaceOp(op, genericOp.getResult(0));
+      return success();        
+    }
+  };
+
+  #define GEN_PASS_DEF_NNLOWERING
+  #include "MinimalPasses.h.inc"
+  
+  struct NNToLinalgPass : public impl::NNLoweringBase<NNToLinalgPass> {
     void getDependentDialects(DialectRegistry &registry) const override {
       registry.insert<linalg::LinalgDialect, tensor::TensorDialect, arith::ArithDialect>();
     }
@@ -104,75 +146,22 @@ struct MatMulToLinalgPattern : public OpRewritePattern<MatMulOp> {
     void runOnOperation() override {
       MLIRContext *context = &getContext();
       RewritePatternSet patterns(context);
-      patterns.add<MatMulToLinalgPattern>(context);
 
-      // Set up a conversion target that marks MatMulOp as illegal.
+      patterns.add<MatMulToLinalgPattern, ReluToLinalgPattern>(context);
+
       ConversionTarget target(*context);
       target.addLegalDialect<linalg::LinalgDialect, tensor::TensorDialect, arith::ArithDialect, func::FuncDialect>();
-      target.addIllegalOp<MatMulOp>();
+      target.addIllegalOp<MatMulOp, ReluOp>();
 
       if (failed(applyPartialConversion(getOperation(), target, std::move(patterns))))
         signalPassFailure();
     }
   };
+
 }
 
-namespace {
-struct MatMulReluFusionPattern : public OpRewritePattern<minimal::ReluOp> {
-  using OpRewritePattern<minimal::ReluOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(minimal::ReluOp reluOp,
-                               PatternRewriter &rewriter) const override {
-    // Check if the input to ReLU is a MatMul operation
-    auto matmulOp = reluOp.getInput().getDefiningOp<minimal::MatMulOp>();
-    if (!matmulOp)
-      return failure();
-
-    // Check if the MatMul has other uses
-    if (!matmulOp.getResult().hasOneUse())
-      return failure();
-
-    // Create a fused operation at the location of the MatMul
-    Location loc = matmulOp.getLoc();
-    Value fusedOp = rewriter.create<minimal::FusedMatMulReluOp>(
-        loc,
-        reluOp.getType(),
-        matmulOp.getLhs(),
-        matmulOp.getRhs());
-
-    // Replace ReLU with the fused operation result
-    rewriter.replaceOp(reluOp, fusedOp);
-
-    // The original MatMul is now dead as its only use was replaced
-    rewriter.eraseOp(matmulOp);
-
-    return success();
-  }
-};
-
-struct ReluFusion : public impl::ReluFusionBase<ReluFusion> {
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<minimal::MinimalDialect>();
-  }
-
-  void runOnOperation() override {
-    MLIRContext *context = &getContext();
-    RewritePatternSet patterns(context);
-    patterns.add<MatMulReluFusionPattern>(context);
-
-    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
-      signalPassFailure();
-  }
-};
-}
-
-std::unique_ptr<mlir::Pass> createReluFusionPass() {
-  return std::make_unique<ReluFusion>();
-}
-
-
-std::unique_ptr<mlir::Pass> createMatMulToLinalgPass() {
-  return std::make_unique<MatMulToLinalg>();
+std::unique_ptr<mlir::Pass> createNNToLinalgPass() {
+  return std::make_unique<NNToLinalgPass>();
 }
 
 } // namespace mlir::minimal
