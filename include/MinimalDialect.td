@@ -186,6 +186,24 @@ def MatMulBufferize: Pass<"matmul-bufferize", "::mlir::func::FuncOp"> {
     ];
 }
 
+def MatMulReluFusion: Pass<"fuse-matmul-relu", "::mlir::func::FuncOp"> {
+  let summary = "Fuse matmul and ReLU operations for better performance";
+  let description = [{
+    This pass identifies patterns where a matrix multiplication is immediately
+    followed by a ReLU activation function and fuses them into a single operation.
+    ```
+  }];
+  
+  let constructor = "mlir::minimal::createFusedMatmulReLUPass()";
+  
+  let dependentDialects = [
+    "mlir::linalg::LinalgDialect",
+    "mlir::tensor::TensorDialect",
+    "mlir::arith::ArithDialect"
+  ];
+}
+
+
 //===----------------------------------------------------------------------===//
 // Type definitions.
 //===----------------------------------------------------------------------===//

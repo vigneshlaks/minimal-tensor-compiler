@@ -157,11 +157,129 @@ namespace {
         signalPassFailure();
     }
   };
+  namespace {
+    #define GEN_PASS_DEF_MATMULRELUFUSION
+    #include "MinimalPasses.h.inc"
 
+
+    class FuseMatmulReLUPattern : public OpRewritePattern<linalg::GenericOp> {
+    public:
+      using OpRewritePattern::OpRewritePattern;
+    
+      LogicalResult matchAndRewrite(linalg::GenericOp genericOp,
+                                    PatternRewriter &rewriter) const override {
+        // Check for one input and one output
+        if (genericOp.getNumDpsInputs() != 1 || genericOp.getNumDpsInits() != 1)
+          return failure();
+
+        // Check the block
+        Region &region = genericOp.getRegion();
+        if (!llvm::hasSingleElement(region))
+          return failure();
+
+        // Get the single block and its terminator
+        Block &block = region.front();
+        auto yieldOp = dyn_cast<linalg::YieldOp>(block.getTerminator());
+        if (!yieldOp)
+          return failure();
+        auto maxOp = dyn_cast<arith::MaximumFOp>(yieldOp.getOperand(0)
+                                                    .getDefiningOp());
+        if (!maxOp)
+          return failure();
+    
+        // Check for matmul producer
+        auto matmulOp = genericOp.getDpsInputOperand(0)->get()
+                            .getDefiningOp<linalg::MatmulOp>();
+        if (!matmulOp)
+          return failure();
+
+        // Build fused generic
+        Location loc = genericOp.getLoc();
+        
+        // Get the indexing map and iterator types from the matmul
+        SmallVector<AffineMap> maps = matmulOp.getIndexingMapsArray();
+        SmallVector<utils::IteratorType> itTypes = matmulOp.getIteratorTypesArray();
+    
+        // Element type for the constant zero we'll re‑create inside the fused region
+        auto tensorType = genericOp.getResultTypes()[0]
+                              .cast<RankedTensorType>();
+        Type eltType = tensorType.getElementType();
+    
+        // Inputs: the original two matmul operands
+        Value lhs = matmulOp.getDpsInputOperand(0)->get();
+        Value rhs = matmulOp.getDpsInputOperand(1)->get();
+
+        // Init/output: the generic's init-tensor (same shape as its result)
+        Value init = genericOp.getDpsInitOperand(0)->get();
+    
+        // Create the new fused generic
+        auto fused = rewriter.create<linalg::GenericOp>(
+            loc,
+            genericOp.getResultTypes(),
+            ValueRange{lhs, rhs},
+            ValueRange{init},
+            maps,
+            itTypes,
+            [&](OpBuilder &nestedBuilder,
+                Location nestedLoc,
+                ValueRange args) {
+              // args = [A(i,j), B(j,k), Acc(i,k)]
+              Value a = args[0];
+              Value b = args[1];
+              Value acc = args[2];
+              // dot-accumulate step
+              Value prod = nestedBuilder.create<arith::MulFOp>(nestedLoc, a, b);
+              Value sum = nestedBuilder.create<arith::AddFOp>(
+                  nestedLoc, prod, acc);
+              // Relu max(sum, 0)
+              Value zero = nestedBuilder.create<arith::ConstantOp>(
+                  nestedLoc,
+                  nestedBuilder.getZeroAttr(eltType));
+              Value relu = nestedBuilder.create<arith::MaximumFOp>(
+                  nestedLoc, sum, zero);
+              nestedBuilder.create<linalg::YieldOp>(nestedLoc, relu);
+            });
+    
+        // Replace with fused result and remove the matmul
+        rewriter.replaceOp(genericOp, fused.getResults());
+        rewriter.eraseOp(matmulOp);
+        return success();
+      }
+    };
+    
+    // This is the actual pass that will run the fusion pattern
+    struct FuseMatmulReLUPass : public impl::MatMulReluFusionBase<FuseMatmulReLUPass> {
+      void getDependentDialects(mlir::DialectRegistry &registry) const override {
+        registry.insert<mlir::linalg::LinalgDialect, mlir::arith::ArithDialect, 
+                       mlir::tensor::TensorDialect>();
+      }
+    
+      void runOnOperation() override {
+        mlir::MLIRContext *context = &getContext();
+        mlir::RewritePatternSet patterns(context);
+        
+        // Add our custom pattern
+        patterns.add<FuseMatmulReLUPattern>(context);
+        
+        // potentially useful patten from Linalg
+        mlir::linalg::populateLinalgToStandardConversionPatterns(patterns);
+        
+        // Apply patterns
+        if (mlir::failed(mlir::applyPatternsAndFoldGreedily(getOperation(), std::move(patterns)))) {
+          signalPassFailure();
+        }
+      }
+    };
+    
+    } // end anonymous namespace
 }
 
 std::unique_ptr<mlir::Pass> createNNToLinalgPass() {
   return std::make_unique<NNToLinalgPass>();
+}
+
+std::unique_ptr<mlir::Pass> createFusedMatmulReLUPass() {
+  return std::make_unique<FuseMatmulReLUPass>();
 }
 
 } // namespace mlir::minimal

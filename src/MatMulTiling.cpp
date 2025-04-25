@@ -30,10 +30,6 @@
 #include "llvm/Support/Debug.h"
 
 
-
-// Define and include the TableGen-generated pass declarations.
-// Make sure the macro is defined before including the generated file.
-
 namespace mlir {
 namespace minimal {
 

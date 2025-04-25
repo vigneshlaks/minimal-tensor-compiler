@@ -30,6 +30,7 @@ namespace mlir::minimal {
 
 // Neural net to linalg
 std::unique_ptr<mlir::Pass> createNNToLinalgPass();
+std::unique_ptr<mlir::Pass> createFusedMatmulReLUPass();
 
 std::unique_ptr<mlir::Pass> createMatMulTilingPass();
 std::unique_ptr<mlir::Pass> createMatMulBufferizePass();
